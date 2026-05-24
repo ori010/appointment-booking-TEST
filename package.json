@@ -7,6 +7,8 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "db:migrate": "prisma migrate dev --name init",
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",
@@ -23,6 +25,7 @@
     "@types/node": "^20.14.2",
     "prisma": "^5.14.0",
     "tsx": "^4.15.6",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
   }
 }
