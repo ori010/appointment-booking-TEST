@@ -30,20 +30,17 @@ model Service {
 }
 
 model Appointment {
-  id         String            @id @default(cuid())
+  id         String   @id @default(cuid())
   customerId String
   serviceId  String
   startTime  DateTime
   endTime    DateTime
-  status     AppointmentStatus @default(scheduled)
-  createdAt  DateTime          @default(now())
+  // SQLite does not support Prisma enums, so status is stored as a string.
+  // Valid values are enforced in the application layer:
+  // scheduled | cancelled | completed
+  status     String   @default("scheduled")
+  createdAt  DateTime @default(now())
 
   customer Customer @relation(fields: [customerId], references: [id])
   service  Service  @relation(fields: [serviceId], references: [id])
-}
-
-enum AppointmentStatus {
-  scheduled
-  cancelled
-  completed
 }
