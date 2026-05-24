@@ -1,6 +1,5 @@
 # appointment-booking-api-typescript
 
-A clean, simple REST API for appointment booking, built with **TypeScript**, **Node.js**, **Express**, **Prisma**, and **SQLite**.
 
 > This project is a simplified public backend demo inspired by a larger private appointment automation system I built. The goal is to demonstrate backend development skills with TypeScript, REST APIs, database modeling, validation, and appointment availability logic.
 
