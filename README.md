@@ -135,8 +135,8 @@ appointment-booking-api-typescript/
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/ori010/appointment-booking-api-typescript.git
-cd appointment-booking-api-typescript
+git clone https://github.com/ori010/appointment-booking-TEST.git
+cd appointment-booking-TEST
 ```
 
 ### 2. Install dependencies
