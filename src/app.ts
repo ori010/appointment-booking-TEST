@@ -1,0 +1,31 @@
+import express from "express";
+import customersRouter from "./routes/customers.routes";
+import servicesRouter from "./routes/services.routes";
+import appointmentsRouter from "./routes/appointments.routes";
+import availabilityRouter from "./routes/availability.routes";
+import { errorHandler } from "./middleware/errorHandler";
+
+const app = express();
+
+app.use(express.json());
+
+// Health check
+app.get("/health", (_req, res) => {
+  res.json({ success: true, message: "API is running" });
+});
+
+// Routes
+app.use("/customers", customersRouter);
+app.use("/services", servicesRouter);
+app.use("/appointments", appointmentsRouter);
+app.use("/availability", availabilityRouter);
+
+// 404 handler
+app.use((_req, res) => {
+  res.status(404).json({ success: false, message: "Route not found" });
+});
+
+// Centralized error handler (must be last)
+app.use(errorHandler);
+
+export default app;
