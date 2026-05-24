@@ -27,6 +27,12 @@ export async function getAppointmentById(id: string) {
   return appointment;
 }
 
+/** Returns true if a UTC time (hour + minute) is outside working hours 09:00–17:00. */
+function isOutsideWorkingHours(hour: number, minute: number): boolean {
+  const totalMinutes = hour * 60 + minute;
+  return totalMinutes < 9 * 60 || totalMinutes > 17 * 60;
+}
+
 export async function createAppointment(data: CreateAppointmentInput) {
   // Validate customer exists
   const customer = await prisma.customer.findUnique({
@@ -41,9 +47,26 @@ export async function createAppointment(data: CreateAppointmentInput) {
   if (!service) throw new AppError("Service not found", 404);
   if (!service.isActive) throw new AppError("Service is not currently active", 400);
 
-  // Calculate endTime
+  // Calculate times
   const startTime = new Date(data.startTime);
   const endTime = new Date(startTime.getTime() + service.durationMinutes * 60 * 1000);
+
+  // Enforce working hours: startTime must be within 09:00–17:00 UTC
+  if (isOutsideWorkingHours(startTime.getUTCHours(), startTime.getUTCMinutes())) {
+    throw new AppError(
+      "Appointment must start between 09:00 and 17:00 UTC",
+      400
+    );
+  }
+
+  // endTime must not exceed 17:00 UTC
+  const endTotalMinutes = endTime.getUTCHours() * 60 + endTime.getUTCMinutes();
+  if (endTotalMinutes > 17 * 60) {
+    throw new AppError(
+      "Appointment would end after working hours (17:00 UTC). Please choose an earlier slot.",
+      400
+    );
+  }
 
   // Prevent overlapping scheduled appointments
   const overlap = await prisma.appointment.findFirst({
