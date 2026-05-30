@@ -1,8 +1,9 @@
 import prisma from "../db/prisma";
 import { AppError } from "../middleware/errorHandler";
 import { CreateAppointmentInput } from "../validators/appointments.validator";
+import { UserRole } from "../types/auth";
 
-// Mirrors the Prisma enum – kept as a const so it's type-safe without
+// Mirrors the Prisma enums — kept as consts so they're type-safe without
 // requiring the generated client at compile time.
 const AppointmentStatus = {
   scheduled: "scheduled",
@@ -10,6 +11,22 @@ const AppointmentStatus = {
   completed: "completed",
 } as const;
 type AppointmentStatus = (typeof AppointmentStatus)[keyof typeof AppointmentStatus];
+
+// Local type for rows returned from Prisma that now include bookedById.
+// Use `prisma as any` for operations involving the new field until
+// `prisma generate` has been re-run after the schema update.
+type AppointmentRow = {
+  id: string;
+  customerId: string;
+  serviceId: string;
+  bookedById: string | null;
+  startTime: Date;
+  endTime: Date;
+  status: string;
+  createdAt: Date;
+};
+
+const db = prisma as any;
 
 export async function getAllAppointments() {
   return prisma.appointment.findMany({
@@ -33,7 +50,10 @@ function isOutsideWorkingHours(hour: number, minute: number): boolean {
   return totalMinutes < 9 * 60 || totalMinutes > 17 * 60;
 }
 
-export async function createAppointment(data: CreateAppointmentInput) {
+export async function createAppointment(
+  data: CreateAppointmentInput,
+  bookedById?: string
+) {
   // Validate customer exists
   const customer = await prisma.customer.findUnique({
     where: { id: data.customerId },
@@ -80,10 +100,11 @@ export async function createAppointment(data: CreateAppointmentInput) {
     throw new AppError("This time slot overlaps with an existing appointment", 409);
   }
 
-  return prisma.appointment.create({
+  return db.appointment.create({
     data: {
       customerId: data.customerId,
       serviceId: data.serviceId,
+      bookedById: bookedById ?? null,
       startTime,
       endTime,
       status: AppointmentStatus.scheduled,
@@ -92,8 +113,14 @@ export async function createAppointment(data: CreateAppointmentInput) {
   });
 }
 
-export async function cancelAppointment(id: string) {
-  const appointment = await prisma.appointment.findUnique({ where: { id } });
+export async function cancelAppointment(
+  id: string,
+  requester: { id: string; role: UserRole }
+) {
+  const appointment = (await db.appointment.findUnique({
+    where: { id },
+  })) as AppointmentRow | null;
+
   if (!appointment) throw new AppError("Appointment not found", 404);
 
   if (appointment.status === AppointmentStatus.cancelled) {
@@ -104,7 +131,14 @@ export async function cancelAppointment(id: string) {
     throw new AppError("Cannot cancel a completed appointment", 400);
   }
 
-  return prisma.appointment.update({
+  // Ownership check: CUSTOMER can only cancel appointments they booked
+  if (requester.role === UserRole.CUSTOMER) {
+    if (appointment.bookedById !== requester.id) {
+      throw new AppError("You can only cancel your own appointments", 403);
+    }
+  }
+
+  return db.appointment.update({
     where: { id },
     data: { status: AppointmentStatus.cancelled },
     include: { customer: true, service: true },

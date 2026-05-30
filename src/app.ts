@@ -1,13 +1,19 @@
 import express from "express";
+import swaggerUi from "swagger-ui-express";
+import authRouter from "./routes/auth.routes";
 import customersRouter from "./routes/customers.routes";
 import servicesRouter from "./routes/services.routes";
 import appointmentsRouter from "./routes/appointments.routes";
 import availabilityRouter from "./routes/availability.routes";
 import { errorHandler } from "./middleware/errorHandler";
+import openApiSpec from "./docs/openapi";
 
 const app = express();
 
 app.use(express.json());
+
+// API documentation
+app.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiSpec));
 
 // Health check
 app.get("/health", (_req, res) => {
@@ -15,6 +21,7 @@ app.get("/health", (_req, res) => {
 });
 
 // Routes
+app.use("/auth", authRouter);
 app.use("/customers", customersRouter);
 app.use("/services", servicesRouter);
 app.use("/appointments", appointmentsRouter);

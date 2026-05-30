@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -9,6 +6,27 @@ datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
 }
+
+// ─── Auth ─────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(CUSTOMER)
+  createdAt    DateTime @default(now())
+
+  bookedAppointments Appointment[] @relation("BookedBy")
+}
+
+enum UserRole {
+  ADMIN
+  STAFF
+  CUSTOMER
+}
+
+// ─── Booking domain ───────────────────────────────────────────────────────
 
 model Customer {
   id           String        @id @default(cuid())
@@ -30,17 +48,22 @@ model Service {
 }
 
 model Appointment {
-  id         String   @id @default(cuid())
+  id         String            @id @default(cuid())
   customerId String
   serviceId  String
+  bookedById String?           // User who created this booking (null = legacy/seeded)
   startTime  DateTime
   endTime    DateTime
-  // SQLite does not support Prisma enums, so status is stored as a string.
-  // Valid values are enforced in the application layer:
-  // scheduled | cancelled | completed
-  status     String   @default("scheduled")
-  createdAt  DateTime @default(now())
+  status     AppointmentStatus @default(scheduled)
+  createdAt  DateTime          @default(now())
 
   customer Customer @relation(fields: [customerId], references: [id])
   service  Service  @relation(fields: [serviceId], references: [id])
+  bookedBy User?    @relation("BookedBy", fields: [bookedById], references: [id])
+}
+
+enum AppointmentStatus {
+  scheduled
+  cancelled
+  completed
 }

@@ -1,0 +1,794 @@
+import { OpenAPIV3 } from "openapi-types";
+
+const spec: OpenAPIV3.Document = {
+  openapi: "3.0.3",
+  info: {
+    title: "Appointment Booking API",
+    version: "1.0.0",
+    description: `
+A production-style REST API for appointment booking built with TypeScript, Express, Prisma and Zod.
+
+**Working hours:** all times are UTC. Appointments must start and end within **09:00 – 17:00 UTC**.
+
+**Conflict prevention:** the API rejects any booking that overlaps an existing \`scheduled\` appointment.
+
+Source code: [github.com/ori010/appointment-booking-api-typescript](https://github.com/ori010/appointment-booking-api-typescript)
+    `.trim(),
+    contact: {
+      name: "GitHub Repository",
+      url: "https://github.com/ori010/appointment-booking-api-typescript",
+    },
+    license: { name: "MIT" },
+  },
+  servers: [
+    { url: "http://localhost:3000", description: "Local development server" },
+  ],
+
+  // -----------------------------------------------------------------------
+  // Reusable components
+  // -----------------------------------------------------------------------
+  components: {
+    schemas: {
+      // --- User (auth) ---------------------------------------------------
+      User: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "clxabc123" },
+          name: { type: "string", example: "Jane Doe" },
+          email: { type: "string", format: "email", example: "jane@example.com" },
+          role: { type: "string", enum: ["ADMIN", "STAFF", "CUSTOMER"], example: "CUSTOMER" },
+          createdAt: { type: "string", format: "date-time" },
+        },
+        required: ["id", "name", "email", "role", "createdAt"],
+      },
+      RegisterRequest: {
+        type: "object",
+        properties: {
+          name: { type: "string", minLength: 1, example: "Jane Doe" },
+          email: { type: "string", format: "email", example: "jane@example.com" },
+          password: { type: "string", minLength: 8, example: "securepassword" },
+          role: { type: "string", enum: ["ADMIN", "STAFF", "CUSTOMER"], default: "CUSTOMER" },
+        },
+        required: ["name", "email", "password"],
+      },
+      LoginRequest: {
+        type: "object",
+        properties: {
+          email: { type: "string", format: "email", example: "admin@example.com" },
+          password: { type: "string", example: "admin1234" },
+        },
+        required: ["email", "password"],
+      },
+      AuthResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean", example: true },
+          data: {
+            type: "object",
+            properties: {
+              user: { "$ref": "#/components/schemas/User" },
+              token: { type: "string", example: "eyJhbGciOiJIUzI1NiJ9..." },
+            },
+          },
+        },
+      },
+
+      // --- Success wrapper -------------------------------------------------
+      SuccessResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean", example: true },
+          data: {},
+        },
+        required: ["success", "data"],
+      },
+
+      // --- Error wrapper ---------------------------------------------------
+      ErrorResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean", example: false },
+          message: { type: "string", example: "Resource not found" },
+        },
+        required: ["success", "message"],
+      },
+      ValidationErrorResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean", example: false },
+          message: { type: "string", example: "Validation error" },
+          errors: {
+            type: "array",
+            items: { type: "string" },
+            example: ["email: Invalid email address"],
+          },
+        },
+        required: ["success", "message", "errors"],
+      },
+
+      // --- Customer --------------------------------------------------------
+      Customer: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "clx1234abcd" },
+          name: { type: "string", example: "Jane Doe" },
+          phone: { type: "string", example: "+1-555-9999" },
+          email: { type: "string", format: "email", example: "jane@example.com" },
+          createdAt: { type: "string", format: "date-time", example: "2024-06-01T10:00:00.000Z" },
+        },
+        required: ["id", "name", "phone", "email", "createdAt"],
+      },
+      CreateCustomerRequest: {
+        type: "object",
+        properties: {
+          name: { type: "string", minLength: 1, maxLength: 100, example: "Jane Doe" },
+          phone: { type: "string", minLength: 7, maxLength: 20, example: "+1-555-9999" },
+          email: { type: "string", format: "email", example: "jane@example.com" },
+        },
+        required: ["name", "phone", "email"],
+      },
+
+      // --- Service ---------------------------------------------------------
+      Service: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "clx5678efgh" },
+          name: { type: "string", example: "Haircut" },
+          durationMinutes: { type: "integer", example: 30 },
+          price: { type: "number", format: "float", example: 25.0 },
+          isActive: { type: "boolean", example: true },
+          createdAt: { type: "string", format: "date-time", example: "2024-06-01T08:00:00.000Z" },
+        },
+        required: ["id", "name", "durationMinutes", "price", "isActive", "createdAt"],
+      },
+      CreateServiceRequest: {
+        type: "object",
+        properties: {
+          name: { type: "string", minLength: 1, maxLength: 100, example: "Haircut" },
+          durationMinutes: {
+            type: "integer",
+            minimum: 5,
+            example: 30,
+            description: "Service duration in minutes (minimum 5)",
+          },
+          price: { type: "number", minimum: 0, example: 25.0 },
+          isActive: { type: "boolean", default: true, example: true },
+        },
+        required: ["name", "durationMinutes", "price"],
+      },
+
+      // --- Appointment -----------------------------------------------------
+      AppointmentStatus: {
+        type: "string",
+        enum: ["scheduled", "cancelled", "completed"],
+        example: "scheduled",
+      },
+      Appointment: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "clx9012ijkl" },
+          customerId: { type: "string", example: "clx1234abcd" },
+          serviceId: { type: "string", example: "clx5678efgh" },
+          startTime: { type: "string", format: "date-time", example: "2024-06-15T09:00:00.000Z" },
+          endTime: { type: "string", format: "date-time", example: "2024-06-15T09:30:00.000Z" },
+          status: { $ref: "#/components/schemas/AppointmentStatus" },
+          createdAt: { type: "string", format: "date-time", example: "2024-06-01T10:00:00.000Z" },
+          customer: { $ref: "#/components/schemas/Customer" },
+          service: { $ref: "#/components/schemas/Service" },
+        },
+        required: ["id", "customerId", "serviceId", "startTime", "endTime", "status", "createdAt"],
+      },
+      CreateAppointmentRequest: {
+        type: "object",
+        properties: {
+          customerId: { type: "string", example: "clx1234abcd" },
+          serviceId: { type: "string", example: "clx5678efgh" },
+          startTime: {
+            type: "string",
+            format: "date-time",
+            example: "2024-06-15T09:00:00.000Z",
+            description: "ISO 8601 datetime. Must be within working hours 09:00–17:00 UTC.",
+          },
+        },
+        required: ["customerId", "serviceId", "startTime"],
+      },
+
+      // --- Availability ----------------------------------------------------
+      TimeSlot: {
+        type: "object",
+        properties: {
+          startTime: { type: "string", format: "date-time", example: "2024-06-15T09:00:00.000Z" },
+          endTime: { type: "string", format: "date-time", example: "2024-06-15T09:30:00.000Z" },
+        },
+        required: ["startTime", "endTime"],
+      },
+      AvailabilityResponse: {
+        type: "object",
+        properties: {
+          date: { type: "string", example: "2024-06-15" },
+          serviceId: { type: "string", example: "clx5678efgh" },
+          serviceName: { type: "string", example: "Haircut" },
+          durationMinutes: { type: "integer", example: 30 },
+          availableSlots: {
+            type: "array",
+            items: { $ref: "#/components/schemas/TimeSlot" },
+          },
+        },
+        required: ["date", "serviceId", "serviceName", "durationMinutes", "availableSlots"],
+      },
+    },
+
+
+      // Auth security scheme
+      securitySchemes: {
+        BearerAuth: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
+          description: "JWT token obtained from POST /auth/login or POST /auth/register",
+        },
+      },
+
+    // Reusable parameters
+    parameters: {
+      idParam: {
+        name: "id",
+        in: "path",
+        required: true,
+        schema: { type: "string" },
+        description: "Resource ID (cuid)",
+        example: "clx1234abcd",
+      },
+    },
+
+    // Reusable responses
+    responses: {
+      NotFound: {
+        description: "Resource not found",
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/ErrorResponse" },
+            example: { success: false, message: "Resource not found" },
+          },
+        },
+      },
+      BadRequest: {
+        description: "Validation error or invalid input",
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/ValidationErrorResponse" },
+          },
+        },
+      },
+      Conflict: {
+        description: "Conflict — duplicate or overlapping resource",
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/ErrorResponse" },
+            example: {
+              success: false,
+              message: "This time slot overlaps with an existing appointment",
+            },
+          },
+        },
+      },
+    },
+  },
+
+  // -------------------------------------------------------------------------
+  // Paths
+  // -------------------------------------------------------------------------
+  paths: {
+    // --- Auth --------------------------------------------------------------
+    "/auth/register": {
+      post: {
+        tags: ["Auth"],
+        summary: "Register a new user",
+        operationId: "register",
+        description: "Creates a new user account. Returns a JWT token immediately — no separate login needed.",
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/RegisterRequest" } } },
+        },
+        responses: {
+          "201": {
+            description: "User registered successfully",
+            content: { "application/json": { schema: { $ref: "#/components/schemas/AuthResponse" } } },
+          },
+          "400": { $ref: "#/components/responses/BadRequest" },
+          "409": {
+            description: "Email already registered",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorResponse" },
+                example: { success: false, message: "An account with this email already exists" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/auth/login": {
+      post: {
+        tags: ["Auth"],
+        summary: "Log in",
+        operationId: "login",
+        description: "Authenticates with email + password. Returns a JWT token valid for 7 days.",
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/LoginRequest" } } },
+        },
+        responses: {
+          "200": {
+            description: "Login successful",
+            content: { "application/json": { schema: { $ref: "#/components/schemas/AuthResponse" } } },
+          },
+          "400": { $ref: "#/components/responses/BadRequest" },
+          "401": {
+            description: "Invalid credentials",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorResponse" },
+                example: { success: false, message: "Invalid email or password" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/auth/me": {
+      get: {
+        tags: ["Auth"],
+        summary: "Get current user",
+        operationId: "getMe",
+        description: "Returns the authenticated user's profile. Requires a valid Bearer token.",
+        security: [{ BearerAuth: [] }],
+        responses: {
+          "200": {
+            description: "Current user profile",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: { $ref: "#/components/schemas/User" },
+                  },
+                },
+              },
+            },
+          },
+          "401": {
+            description: "Missing or invalid token",
+            content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } },
+          },
+        },
+      },
+    },
+
+    // --- Health -------------------------------------------------------------
+    "/health": {
+      get: {
+        tags: ["Health"],
+        summary: "Health check",
+        description: "Returns a 200 OK when the server is running.",
+        operationId: "getHealth",
+        responses: {
+          "200": {
+            description: "Server is healthy",
+            content: {
+              "application/json": {
+                example: { success: true, message: "API is running" },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    // --- Customers ----------------------------------------------------------
+    "/customers": {
+      get: {
+        tags: ["Customers"],
+        security: [{ BearerAuth: [] }],
+        summary: "List all customers",
+        operationId: "listCustomers",
+        responses: {
+          "200": {
+            description: "Array of customers ordered by createdAt descending",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/Customer" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        tags: ["Customers"],
+        security: [{ BearerAuth: [] }],
+        summary: "Create a new customer",
+        operationId: "createCustomer",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/CreateCustomerRequest" },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "Customer created successfully",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: { $ref: "#/components/schemas/Customer" },
+                  },
+                },
+              },
+            },
+          },
+          "400": { $ref: "#/components/responses/BadRequest" },
+          "409": {
+            description: "Email or phone already in use",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorResponse" },
+                example: {
+                  success: false,
+                  message: "A customer with this email or phone already exists",
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/customers/{id}": {
+      get: {
+        tags: ["Customers"],
+        security: [{ BearerAuth: [] }],
+        summary: "Get customer by ID",
+        operationId: "getCustomerById",
+        parameters: [{ $ref: "#/components/parameters/idParam" }],
+        responses: {
+          "200": {
+            description: "Customer found",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: { $ref: "#/components/schemas/Customer" },
+                  },
+                },
+              },
+            },
+          },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
+
+    // --- Services -----------------------------------------------------------
+    "/services": {
+      get: {
+        tags: ["Services"],
+        summary: "List all services",
+        operationId: "listServices",
+        responses: {
+          "200": {
+            description: "Array of services ordered by createdAt descending",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/Service" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        tags: ["Services"],
+        security: [{ BearerAuth: [] }],
+        summary: "Create a new service (ADMIN only)",
+        operationId: "createService",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/CreateServiceRequest" },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "Service created successfully",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: { $ref: "#/components/schemas/Service" },
+                  },
+                },
+              },
+            },
+          },
+          "400": { $ref: "#/components/responses/BadRequest" },
+        },
+      },
+    },
+    "/services/{id}": {
+      get: {
+        tags: ["Services"],
+        summary: "Get service by ID",
+        operationId: "getServiceById",
+        parameters: [{ $ref: "#/components/parameters/idParam" }],
+        responses: {
+          "200": {
+            description: "Service found",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: { $ref: "#/components/schemas/Service" },
+                  },
+                },
+              },
+            },
+          },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
+
+    // --- Appointments -------------------------------------------------------
+    "/appointments": {
+      get: {
+        tags: ["Appointments"],
+        security: [{ BearerAuth: [] }],
+        summary: "List all appointments",
+        operationId: "listAppointments",
+        responses: {
+          "200": {
+            description: "Array of appointments ordered by startTime ascending. Includes nested customer and service objects.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/Appointment" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        tags: ["Appointments"],
+        security: [{ BearerAuth: [] }],
+        summary: "Book a new appointment",
+        operationId: "createAppointment",
+        description: `Books a new appointment. The API will:
+- Verify the customer exists
+- Verify the service exists and is active
+- Calculate \`endTime\` automatically from the service duration
+- Reject \`startTime\` outside working hours (09:00–17:00 UTC)
+- Reject if \`endTime\` would exceed 17:00 UTC
+- Reject if the slot overlaps any existing \`scheduled\` appointment`,
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/CreateAppointmentRequest" },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "Appointment booked successfully",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: { $ref: "#/components/schemas/Appointment" },
+                  },
+                },
+              },
+            },
+          },
+          "400": { $ref: "#/components/responses/BadRequest" },
+          "404": { $ref: "#/components/responses/NotFound" },
+          "409": { $ref: "#/components/responses/Conflict" },
+        },
+      },
+    },
+    "/appointments/{id}": {
+      get: {
+        tags: ["Appointments"],
+        security: [{ BearerAuth: [] }],
+        summary: "Get appointment by ID",
+        operationId: "getAppointmentById",
+        parameters: [{ $ref: "#/components/parameters/idParam" }],
+        responses: {
+          "200": {
+            description: "Appointment found (includes nested customer and service)",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: { $ref: "#/components/schemas/Appointment" },
+                  },
+                },
+              },
+            },
+          },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
+    "/appointments/{id}/cancel": {
+      patch: {
+        tags: ["Appointments"],
+        security: [{ BearerAuth: [] }],
+        summary: "Cancel an appointment",
+        operationId: "cancelAppointment",
+        description: "Sets appointment status to `cancelled`. Returns 400 if already cancelled or completed.",
+        parameters: [{ $ref: "#/components/parameters/idParam" }],
+        responses: {
+          "200": {
+            description: "Appointment cancelled",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: { $ref: "#/components/schemas/Appointment" },
+                  },
+                },
+                example: {
+                  success: true,
+                  data: {
+                    id: "clx9012ijkl",
+                    status: "cancelled",
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "Cannot cancel — appointment is already cancelled or completed",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorResponse" },
+                example: {
+                  success: false,
+                  message: "Appointment is already cancelled",
+                },
+              },
+            },
+          },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
+
+    // --- Availability -------------------------------------------------------
+    "/availability": {
+      get: {
+        tags: ["Availability"],
+        summary: "Get available time slots",
+        operationId: "getAvailability",
+        description: `Returns all free time slots for a given date and service.
+
+**Algorithm:**
+1. Generate all slots for the day based on service duration (09:00–17:00 UTC)
+2. Load all \`scheduled\` appointments for that day
+3. Remove any slot that overlaps an existing appointment
+4. Return remaining slots as ISO 8601 datetime pairs`,
+        parameters: [
+          {
+            name: "date",
+            in: "query",
+            required: true,
+            schema: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+            description: "Target date in YYYY-MM-DD format",
+            example: "2024-06-15",
+          },
+          {
+            name: "serviceId",
+            in: "query",
+            required: true,
+            schema: { type: "string" },
+            description: "ID of the service to check availability for",
+            example: "clx5678efgh",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Available slots for the requested day",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: { $ref: "#/components/schemas/AvailabilityResponse" },
+                  },
+                },
+                example: {
+                  success: true,
+                  data: {
+                    date: "2024-06-15",
+                    serviceId: "clx5678efgh",
+                    serviceName: "Haircut",
+                    durationMinutes: 30,
+                    availableSlots: [
+                      {
+                        startTime: "2024-06-15T09:00:00.000Z",
+                        endTime: "2024-06-15T09:30:00.000Z",
+                      },
+                      {
+                        startTime: "2024-06-15T09:30:00.000Z",
+                        endTime: "2024-06-15T10:00:00.000Z",
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+          "400": { $ref: "#/components/responses/BadRequest" },
+          "404": { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
+  },
+
+  tags: [
+    { name: "Auth", description: "Registration, login, and current user" },
+    { name: "Health", description: "Server status" },
+    { name: "Customers", description: "Customer management" },
+    { name: "Services", description: "Bookable service management" },
+    { name: "Appointments", description: "Appointment booking and cancellation" },
+    { name: "Availability", description: "Time slot availability" },
+  ],
+};
+
+export default spec;
