@@ -1,0 +1,26 @@
+services:
+  api:
+    build:
+      context: .
+      target: production
+    ports:
+      - "3000:3000"
+    environment:
+      # SQLite file stored inside the named volume so data survives restarts
+      DATABASE_URL: "file:/app/data/prod.db"
+      PORT: "3000"
+      NODE_ENV: "production"
+    volumes:
+      # Named volume keeps the SQLite database between container restarts
+      - db_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  db_data:
+    driver: local

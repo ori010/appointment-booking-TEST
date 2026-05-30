@@ -1,0 +1,10 @@
+node_modules
+dist
+.env
+prisma/dev.db
+prisma/dev.db-journal
+.DS_Store
+.git
+.github
+*.md
+npm-debug.log*
