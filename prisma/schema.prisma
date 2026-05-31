@@ -14,16 +14,11 @@ model User {
   name         String
   email        String   @unique
   passwordHash String
-  role         UserRole @default(CUSTOMER)
+  // Valid values: ADMIN | STAFF | CUSTOMER  (enforced in application layer)
+  role         String   @default("CUSTOMER")
   createdAt    DateTime @default(now())
 
   bookedAppointments Appointment[] @relation("BookedBy")
-}
-
-enum UserRole {
-  ADMIN
-  STAFF
-  CUSTOMER
 }
 
 // ─── Booking domain ───────────────────────────────────────────────────────
@@ -48,22 +43,17 @@ model Service {
 }
 
 model Appointment {
-  id         String            @id @default(cuid())
+  id         String   @id @default(cuid())
   customerId String
   serviceId  String
-  bookedById String?           // User who created this booking (null = legacy/seeded)
+  bookedById String?  // User who created this booking (null = legacy/seeded)
   startTime  DateTime
   endTime    DateTime
-  status     AppointmentStatus @default(scheduled)
-  createdAt  DateTime          @default(now())
+  // Valid values: scheduled | cancelled | completed  (enforced in application layer)
+  status     String   @default("scheduled")
+  createdAt  DateTime @default(now())
 
   customer Customer @relation(fields: [customerId], references: [id])
   service  Service  @relation(fields: [serviceId], references: [id])
   bookedBy User?    @relation("BookedBy", fields: [bookedById], references: [id])
-}
-
-enum AppointmentStatus {
-  scheduled
-  cancelled
-  completed
 }
